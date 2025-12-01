@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sky Ace: 3D Shooter</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #87CEEB;
+            user-select: none;
+        }
+        #game-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;
+            display: flex; flex-direction: column; justify-content: space-between; padding: 20px; box-sizing: border-box; }
+        .hud-text { color: white; text-shadow: 2px 2px 0 #000; font-size: 24px; font-weight: bold; }
+        #score-display { position: absolute; top: 20px; left: 20px; }
+        #loading-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: white; font-size: 30px; font-weight: bold; text-shadow: 2px 2px 4px black; display: none; z-index: 20; }
+        #health-bar-container { position: absolute; top: 20px; right: 20px;
+            width: 200px; height: 20px; background: rgba(0,0,0,0.5);
+            border: 2px solid white; border-radius: 10px; overflow: hidden; }
+        #health-fill { width: 100%; height: 100%; background: linear-gradient(90deg, #ff4444, #ff8888);
+            transition: width 0.2s ease-out; }
+        #start-screen, #game-over-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7); display: flex; flex-direction: column;
+            align-items: center; justify-content: center; pointer-events: auto; z-index: 10;
+        }
+        h1 { color: white; font-size: 60px; margin-bottom: 10px; text-shadow: 0 0 10px #00ffff;
+            text-transform: uppercase; letter-spacing: 5px; }
+        p { color: #ddd; font-size: 20px; margin-bottom: 30px; }
+        button {
+            padding: 15px 40px; font-size: 24px; background: linear-gradient(45deg,#00ffff,#0088ff);
+            border: none; color: white; cursor: pointer; border-radius: 30px;
+            box-shadow: 0 5px 15px rgba(0,136,255,0.4);
+            transition: transform 0.1s; font-weight: bold; text-transform: uppercase;
+        }
+        button:hover { transform: scale(1.05); box-shadow: 0 5px 25px rgba(0,136,255,0.6); }
+        button:active { transform: scale(0.95); }
+        .hidden { display: none !important; }
+    </style>
+</head>
+
+<body>
+
+<div id="game-container"></div>
+<div id="loading-text">Loading Assets...</div>
+
+<div id="ui-layer">
+    <div id="score-display" class="hud-text">SCORE: 0</div>
+    <div id="health-bar-container"><div id="health-fill"></div></div>
+</div>
+
+<div id="start-screen" class="hidden">
+    <h1>Sky Ace</h1>
+    <p>Mouse to Move • Click/Space to Shoot</p>
+    <button id="start-btn">Take Flight</button>
+</div>
+
+<div id="game-over-screen" class="hidden">
+    <h1>Mission Failed</h1>
+    <p id="final-score">Score: 0</p>
+    <button id="restart-btn">Retry Mission</button>
+</div>
+
+<!-- USE MODULE VERSION OF THREE.JS & GLTFLOADER -->
+<script type="module">
+
+// ==================== IMPORTS ====================
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js";
+import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/loaders/GLTFLoader.js";
+
+// ==================== CONFIG ====================
+const CONFIG = {
+    playerSpeed: 0.1,
+    bulletSpeed: 2.5,
+    enemySpeed: 0.8,
+    spawnRate: 1000,
+    modelScale: 1.0,
+    colors: {
+        sky: 0x87CEEB,
+        fog: 0xcce0ff,
+        player: 0x2255ff,
+        enemy: 0xff3333,
+        bullet: 0xffff00
+    }
+};
+
+// ==================== GLOBALS ====================
+let scene, camera, renderer;
+let player;
+let bullets = [];
+let enemies = [];
+let particles = [];
+let score = 0;
+let playerHealth = 100;
+let isGameRunning = false;
+let lastTime = 0;
+let spawnTimer = 0;
+
+let loadedModel = null;
+
+// Mouse
+const mouse = { x: 0, y: 0 };
+const targetPosition = { x: 0, y: 0 };
+
+// DOM
+const container = document.getElementById('game-container');
+const scoreEl = document.getElementById('score-display');
+const healthFillEl = document.getElementById('health-fill');
+const startScreen = document.getElementById('start-screen');
+const gameOverScreen = document.getElementById('game-over-screen');
+const finalScoreEl = document.getElementById('final-score');
+const loadingText = document.getElementById('loading-text');
+
+// ==================== INIT ====================
+function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(CONFIG.colors.sky);
+    scene.fog = new THREE.Fog(CONFIG.colors.fog, 20, 100);
+
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 200);
+    camera.position.set(0, 0, 20);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    container.appendChild(renderer.domElement);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+
+    const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+    dir.position.set(10, 20, 10);
+    dir.castShadow = true;
+    scene.add(dir);
+
+    createEnvironment();
+
+    window.addEventListener('resize', onWindowResize);
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mousedown', shoot);
+    document.addEventListener('keydown', e => { if (e.code === 'Space') shoot(); });
+
+    document.getElementById('start-btn').onclick = startGame;
+    document.getElementById('restart-btn').onclick = startGame;
+
+    loadModelAndStart();
+}
+
+function loadModelAndStart() {
+    loadingText.style.display = 'block';
+
+    const loader = new GLTFLoader();
+
+    loader.load(
+        './airplane.glb',   // ✔ your file in same folder
+        gltf => {
+            console.log("GLB loaded successfully");
+            loadedModel = gltf.scene;
+            initGame();
+        },
+        undefined,
+        err => {
+            console.error("GLB failed, using fallback plane", err);
+            loadedModel = null;
+            initGame();
+        }
+    );
+}
+
+function initGame() {
+    loadingText.style.display = 'none';
+
+    player = createAirplane(CONFIG.colors.player);
+    scene.add(player);
+
+    startScreen.classList.remove('hidden');
+
+    animate(0);
+}
+
+// ==================== GAME LOGIC ====================
+function startGame() {
+    startScreen.classList.add('hidden');
+    gameOverScreen.classList.add('hidden');
+    resetGame();
+    isGameRunning = true;
+}
+
+function resetGame() {
+    score = 0;
+    playerHealth = 100;
+    updateUI();
+
+    enemies.forEach(e => scene.remove(e.mesh));
+    bullets.forEach(b => scene.remove(b.mesh));
+    particles.forEach(p => scene.remove(p.mesh));
+
+    enemies = [];
+    bullets = [];
+    particles = [];
+
+    player.position.set(0, 0, 0);
+    player.rotation.set(0, 0, 0);
+}
+
+function gameOver() {
+    isGameRunning = false;
+    gameOverScreen.classList.remove('hidden');
+    finalScoreEl.innerText = `Score: ${score}`;
+}
+
+function updateUI() {
+    scoreEl.innerText = `SCORE: ${score}`;
+    healthFillEl.style.width = `${Math.max(0, playerHealth)}%`;
+}
+
+function createEnvironment() {
+    const sea = new THREE.Mesh(
+        new THREE.PlaneGeometry(2000, 2000),
+        new THREE.MeshPhongMaterial({ color: 0x006994, flatShading: true })
+    );
+    sea.rotation.x = -Math.PI / 2;
+    sea.position.y = -15;
+    scene.add(sea);
+
+    for (let i = 0; i < 20; i++) createCloud();
+}
+
+function createCloud() {
+    const cloud = new THREE.Group();
+    const geo = new THREE.BoxGeometry(4,4,4);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.6, transparent: true });
+
+    const chunks = 3 + Math.random() * 3;
+    for (let i = 0; i < chunks; i++) {
+        const m = new THREE.Mesh(geo, mat);
+        m.position.set((Math.random()-0.5)*6, (Math.random()-0.5)*2, (Math.random()-0.5)*4);
+        m.scale.setScalar(0.5 + Math.random());
+        cloud.add(m);
+    }
+
+    cloud.position.set((Math.random()-0.5)*200, -10+Math.random()*20, -50-Math.random()*100);
+    scene.add(cloud);
+}
+
+// ==================== PLAYER / ENEMY MODELS ====================
+function createAirplane(colorHex) {
+
+    // --- If GLB is loaded, use it ---
+    if (loadedModel) {
+        const plane = loadedModel.clone();
+        plane.scale.setScalar(CONFIG.modelScale);
+        plane.rotation.y = Math.PI;
+
+        plane.traverse(child => {
+            if (child.isMesh) {
+                child.material = child.material.clone();
+                child.material.color.setHex(colorHex);
+            }
+        });
+
+        return plane;
+    }
+
+    // --- fallback procedural plane ---
+    const g = new THREE.Group();
+
+    const bodyMat = new THREE.MeshPhongMaterial({ color: colorHex });
+    const propMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
+
+    const fus = new THREE.Mesh(new THREE.ConeGeometry(0.8,4,8).rotateX(Math.PI/2), bodyMat);
+    fus.castShadow = true;
+    g.add(fus);
+
+    const cockpit = new THREE.Mesh(new THREE.BoxGeometry(0.6,0.5,1.5), new THREE.MeshPhongMaterial({ color:0x333333 }));
+    cockpit.position.set(0,0.4,0.2);
+    g.add(cockpit);
+
+    const wings = new THREE.Mesh(new THREE.BoxGeometry(6,0.2,1.2), bodyMat);
+    wings.position.set(0,0,0.2);
+    g.add(wings);
+
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(2,0.2,0.8), bodyMat);
+    tail.position.set(0,0,1.8);
+    g.add(tail);
+
+    const vt = new THREE.Mesh(new THREE.BoxGeometry(0.2,1,0.8), bodyMat);
+    vt.position.set(0,0.4,1.8);
+    g.add(vt);
+
+    const prop = new THREE.Mesh(new THREE.BoxGeometry(2.2,0.2,0.1), propMat);
+    prop.position.set(0,0,-2.1);
+    prop.userData.isPropeller = true;
+    g.add(prop);
+
+    return g;
+}
+
+// ==================== ANIMATION LOOP ====================
+function animate(time) {
+    requestAnimationFrame(animate);
+
+    const delta = time - lastTime;
+    lastTime = time;
+
+    if (player && !loadedModel) {
+        player.children.forEach(ch => {
+            if (ch.userData.isPropeller) ch.rotation.z += 0.4;
+        });
+    }
+
+    if (!isGameRunning) return;
+
+    // Player movement
+    targetPosition.x = mouse.x * 20;
+    targetPosition.y = mouse.y * 10;
+
+    player.position.x += (targetPosition.x - player.position.x) * 0.1;
+    player.position.y += (targetPosition.y - player.position.y) * 0.1;
+
+    player.rotation.z = -(targetPosition.x - player.position.x) * 0.05;
+    player.rotation.x = (targetPosition.y - player.position.y) * 0.05;
+
+    // Bullets
+    for (let i = bullets.length - 1; i >= 0; i--) {
+        const b = bullets[i];
+        b.mesh.position.z -= CONFIG.bulletSpeed;
+        if (b.mesh.position.z < -100) {
+            scene.remove(b.mesh);
+            bullets.splice(i, 1);
+        }
+    }
+
+    // Enemies spawn
+    if (time > spawnTimer) {
+        spawnEnemy();
+        spawnTimer = time + CONFIG.spawnRate;
+        if (CONFIG.spawnRate > 300) CONFIG.spawnRate -= 5;
+    }
+
+    // Enemies movement and collisions
+    for (let i = enemies.length - 1; i >= 0; i--) {
+        const e = enemies[i];
+        e.mesh.position.z += CONFIG.enemySpeed;
+
+        const dist = e.mesh.position.distanceTo(player.position);
+        if (dist < 2.0) {
+            createExplosion(player.position, 0xffaa00);
+            playerHealth -= 20;
+            updateUI();
+
+            scene.remove(e.mesh);
+            enemies.splice(i, 1);
+
+            if (playerHealth <= 0) gameOver();
+            continue;
+        }
+
+        for (let j = bullets.length - 1; j >= 0; j--) {
+            const b = bullets[j];
+            if (b.mesh.position.distanceTo(e.mesh.position) < 2.5) {
+                createExplosion(e.mesh.position, 0xff3333);
+                scene.remove(b.mesh);
+                bullets.splice(j, 1);
+                scene.remove(e.mesh);
+                enemies.splice(i, 1);
+                score += 100;
+                updateUI();
+                break;
+            }
+        }
+    }
+
+    updateParticles();
+    renderer.render(scene, camera);
+}
+
+function spawnEnemy() {
+    const enemy = createAirplane(CONFIG.colors.enemy);
+
+    enemy.position.set((Math.random()-0.5)*40, (Math.random()-0.5)*20, -100);
+
+    if (!loadedModel) enemy.rotation.y = Math.PI;
+
+    enemy.offset = Math.random() * 100;
+    scene.add(enemy);
+    enemies.push({ mesh: enemy, offset: enemy.offset });
+}
+
+function shoot() {
+    if (!isGameRunning) return;
+
+    const bullet = new THREE.Mesh(
+        new THREE.SphereGeometry(0.2, 4, 4),
+        new THREE.MeshBasicMaterial({ color: CONFIG.colors.bullet })
+    );
+
+    bullet.position.copy(player.position);
+    bullet.position.z -= 1;
+
+    scene.add(bullet);
+    bullets.push({ mesh: bullet });
+}
+
+function createExplosion(pos, color) {
+    for (let i = 0; i < 8; i++) {
+        const part = new THREE.Mesh(
+            new THREE.BoxGeometry(0.3,0.3,0.3),
+            new THREE.MeshBasicMaterial({ color })
+        );
+        part.position.copy(pos);
+
+        const vel = new THREE.Vector3(
+            Math.random()-0.5,
+            Math.random()-0.5,
+            Math.random()-0.5
+        ).normalize().multiplyScalar(0.5);
+
+        scene.add(part);
+        particles.push({ mesh: part, velocity: vel, life: 1 });
+    }
+}
+
+function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.life -= 0.05;
+        p.mesh.position.add(p.velocity);
+        p.mesh.scale.setScalar(p.life);
+        if (p.life <= 0) {
+            scene.remove(p.mesh);
+            particles.splice(i, 1);
+        }
+    }
+}
+
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function onMouseMove(e) {
+    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+}
+
+// Start
+init();
+
+</script>
+</body>
+</html>
