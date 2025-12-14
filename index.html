@@ -121,9 +121,10 @@ let flightPathPoints = []; // The points the plane is currently following
 let drawingPathPoints = []; // The points being drawn by mouse right now
 let pathLineMesh = null; // The visual line for drawing
 const raycaster = new THREE.Raycaster();
-const drawingPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0); // Invisible plane at Z=0 for raycasting
+// Invisible plane at Z=0 for raycasting, adjusted for the tilted camera view
+const drawingPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0); 
 const mouse = new THREE.Vector2();
-let playerTrail = []; // Array to store trail segments
+let playerTrail = []; 
 
 // DOM
 const scoreEl = document.getElementById('score-display');
@@ -131,58 +132,48 @@ const healthFillEl = document.getElementById('health-fill');
 const startScreen = document.getElementById('start-screen');
 const gameOverScreen = document.getElementById('game-over-screen');
 const finalScoreEl = document.getElementById('final-score');
+const startBtn = document.getElementById('start-btn');
+const restartBtn = document.getElementById('restart-btn');
+
 
 // ==================== INIT ====================
 function init() {
     clock = new THREE.Clock();
     scene = new THREE.Scene();
-    // Fog for depth fade
     scene.fog = new THREE.FogExp2(0x000000, 0.015);
 
-    // Camera setup
     camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 300);
-    camera.position.set(0, -20, 30); // Tilted down view
+    camera.position.set(0, 15, 30); // Raised and slightly tilted view
     camera.lookAt(0, 0, -20);
 
-    // Renderer setup
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    // Enable bloom-like effect via post-processing isn't here, so we fake it with additive blending materials
     document.getElementById('game-container').appendChild(renderer.domElement);
 
-    // Lighting
-    const ambient = new THREE.HemisphereLight(0x443355, 0x000000, 0.8);
-    scene.add(ambient);
-
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1);
-    dirLight.position.set(10, -10, 20);
+    // FIX: Stronger Directional Light for better model visibility
+    const dirLight = new THREE.DirectionalLight(0xffffff, 2.5);
+    dirLight.position.set(0, 20, 30);
     scene.add(dirLight);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4)); // So colors aren't totally black
 
     createEnvironment();
     initPathVisualization();
 
-    // Event Listeners
-    // Add this inside the init() function, near the other button listeners
-    const startBtn = document.getElementById('start-btn');
-    const restartBtn = document.getElementById('restart-btn');
-
-    // Listen for touchstart specifically on buttons to trigger immediately
-    startBtn.addEventListener('touchstart', (e) => { e.stopPropagation(); startGame(); }, {passive: false});
-    restartBtn.addEventListener('touchstart', (e) => { e.stopPropagation(); startGame(); }, {passive: false});
-
     window.addEventListener('resize', onWindowResize);
-    // New Drawing Controls
     document.addEventListener('mousedown', onMouseDown);
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
-    // Touch support for mobile drawing
     document.addEventListener('touchstart', onTouchStart, {passive: false});
     document.addEventListener('touchmove', onTouchMove, {passive: false});
     document.addEventListener('touchend', onMouseUp);
 
 
-    document.getElementById('start-btn').onclick = startGame;
-    document.getElementById('restart-btn').onclick = startGame;
+    // FIX: Use touchstart on buttons for immediate responsiveness on mobile
+    startBtn.addEventListener('click', startGame);
+    restartBtn.addEventListener('click', startGame);
+    
+    startBtn.addEventListener('touchstart', (e) => { e.stopPropagation(); startGame(); }, {passive: false});
+    restartBtn.addEventListener('touchstart', (e) => { e.stopPropagation(); startGame(); }, {passive: false});
 
     initGameObjects();
     animate();
@@ -190,6 +181,7 @@ function init() {
 
 function initGameObjects() {
     player = createSciFiShip(CONFIG.colors.playerBody, CONFIG.colors.playerEngine);
+    player.position.set(0, 0, 0); // Ensure player starts centered
     scene.add(player);
     startScreen.classList.remove('hidden');
 }
@@ -235,7 +227,6 @@ function gameOver() {
 function updateUI() {
     scoreEl.innerText = `SCORE: ${score}`;
     healthFillEl.style.width = `${Math.max(0, playerHealth)}%`;
-    // Dynamic color change for health
     if(playerHealth > 50) healthFillEl.style.background = 'linear-gradient(90deg, #ff00ff, #00ffff)';
     else if (playerHealth > 25) healthFillEl.style.background = 'linear-gradient(90deg, #ff9900, #ff3300)';
     else healthFillEl.style.background = 'linear-gradient(90deg, #ff0000, #990000)';
@@ -243,15 +234,14 @@ function updateUI() {
 
 // ==================== ENVIRONMENT & VISUALS ====================
 function createEnvironment() {
-    // Moving Grid Floor
-    const gridHelper = new THREE.GridHelper(400, 80, CONFIG.colors.grid, CONFIG.colors.grid);
-    gridHelper.position.y = -10;
-    gridHelper.rotation.x = Math.PI / 2; // Rotate to be vertical-ish wall below
+    // Grid Floor
+    const gridHelper = new THREE.GridHelper(400, 40, CONFIG.colors.grid, CONFIG.colors.grid);
+    gridHelper.position.y = 0;
     gridHelper.material.transparent = true;
     gridHelper.material.opacity = 0.3;
     scene.add(gridHelper);
     
-    // Distant "Stars" or data points
+    // Distant Stars
     const starGeo = new THREE.BufferGeometry();
     const starCount = 500;
     const posArray = new Float32Array(starCount * 3);
@@ -265,23 +255,20 @@ function createEnvironment() {
     scene.add(stars);
 }
 
-// Initialize the line that shows the path being drawn
 function initPathVisualization() {
     const material = new THREE.LineBasicMaterial({
         color: CONFIG.colors.pathLine,
         linewidth: 2,
         transparent: true,
         opacity: 0.7,
-        blending: THREE.AdditiveBlending // Glowing effect
+        blending: THREE.AdditiveBlending 
     });
     const geometry = new THREE.BufferGeometry();
     pathLineMesh = new THREE.Line(geometry, material);
-    // Ensure line doesn't get culled when drawing outside initial bounds
     pathLineMesh.frustumCulled = false; 
     scene.add(pathLineMesh);
 }
 
-// Update the visual line based on drawingPathPoints
 function updatePathVisuals() {
     if (drawingPathPoints.length > 1) {
         const pointsArray = new Float32Array(drawingPathPoints.length * 3);
@@ -298,62 +285,49 @@ function updatePathVisuals() {
     }
 }
 
-// ==================== MODELS ====================
+// ==================== SIMPLIFIED PROCEDURAL SHIP MODEL ====================
 function createSciFiShip(bodyColor, engineColor) {
     const g = new THREE.Group();
 
-    // Materials with some specularity for shininess
     const bodyMat = new THREE.MeshPhongMaterial({ color: bodyColor, shininess: 100, flatShading: false });
-    const darkMat = new THREE.MeshPhongMaterial({ color: 0x222222, shininess: 50 });
-    // Glowing engine material using AdditiveBlending
     const engineMat = new THREE.MeshBasicMaterial({ color: engineColor, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.9 });
 
-    // Main hull
-    const hull = new THREE.Mesh(new THREE.ConeGeometry(1, 4, 6), bodyMat);
+    // Main hull (simple cone)
+    const hull = new THREE.Mesh(new THREE.ConeGeometry(1, 4, 8), bodyMat);
     hull.rotation.x = Math.PI / 2;
-    hull.scale.set(1, 1, 1.5);
     g.add(hull);
 
-    // Cockpit
-    const cockpit = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 8, 0, Math.PI*2, 0, Math.PI/2), darkMat);
-    cockpit.rotation.x = Math.PI / 2;
-    cockpit.position.set(0, 0.3, 0.5);
-    g.add(cockpit);
-
-    // Wings
-    const wingShape = new THREE.Shape();
-    wingShape.moveTo(0,0);
-    wingShape.lineTo(4, -1);
-    wingShape.lineTo(4, 0.5);
-    wingShape.lineTo(0, 2);
-    const wingGeo = new THREE.ExtrudeGeometry(wingShape, { depth: 0.2, bevelEnabled: false });
+    // Wings (simple boxes)
+    const wingGeo = new THREE.BoxGeometry(6, 0.2, 1.5);
     const wings = new THREE.Mesh(wingGeo, bodyMat);
-    wings.rotation.x = Math.PI/2;
-    wings.rotation.z = Math.PI/2;
-    wings.position.set(0, 0, -1);
-    wings.scale.set(1,1,0.5);
+    wings.position.set(0, 0, 0.5);
     g.add(wings);
 
-    const leftWing = wings.clone();
-    leftWing.rotation.z = -Math.PI/2;
-    g.add(leftWing);
+    // Tail Fin (vertical)
+    const finGeo = new THREE.BoxGeometry(0.2, 1.5, 1);
+    const fin = new THREE.Mesh(finGeo, bodyMat);
+    fin.position.set(0, 0.7, 1.5);
+    g.add(fin);
 
-    // Engines
-    const engineGeo = new THREE.CylinderGeometry(0.5, 0.4, 2, 8);
+    // Engines & Glow (Cylinders at the back)
+    const engineGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 8);
     const engineR = new THREE.Mesh(engineGeo, bodyMat);
     engineR.rotation.x = Math.PI / 2;
-    engineR.position.set(2, -0.2, -1.5);
+    engineR.position.set(1.5, 0, -1.8);
     g.add(engineR);
     const engineL = engineR.clone();
-    engineL.position.x = -2;
+    engineL.position.x = -1.5;
     g.add(engineL);
 
-    // Engine Glows
+    // Engine Glows (Cone pointing back)
     const glowGeo = new THREE.ConeGeometry(0.4, 1, 8);
-    const glowR = new THREE.Mesh(glowGeo, engineMat);
+    const glowMat = new THREE.MeshBasicMaterial({ color: engineColor, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.9 });
+    
+    const glowR = new THREE.Mesh(glowGeo, glowMat);
     glowR.rotation.x = -Math.PI/2;
-    glowR.position.set(0, 0, -1);
-    engineR.add(glowR); // Add to engine group
+    glowR.position.set(0, 0, -0.5);
+    engineR.add(glowR); 
+    
     const glowL = glowR.clone();
     engineL.add(glowL);
 
@@ -366,6 +340,7 @@ function getMouseWorldPosition(clientX, clientY) {
     mouse.y = -(clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(mouse, camera);
     const intersects = new THREE.Vector3();
+    // Intersect the Z=0 plane (where the player lives)
     raycaster.ray.intersectPlane(drawingPlane, intersects);
     return intersects;
 }
@@ -373,8 +348,13 @@ function getMouseWorldPosition(clientX, clientY) {
 function onMouseDown(e) {
     if (!isGameRunning || e.target.tagName === 'BUTTON') return;
     isDrawing = true;
-    drawingPathPoints = []; // Clear current drawing buffer
+    flightPathPoints = []; // Clear existing path immediately on new click
+    drawingPathPoints = []; 
     const pos = getMouseWorldPosition(e.clientX, e.clientY);
+    
+    // Start drawing from current player position
+    drawingPathPoints.push(player.position.clone()); 
+    // Add the first clicked point
     drawingPathPoints.push(pos);
     updatePathVisuals();
 }
@@ -383,10 +363,9 @@ function onMouseMove(e) {
     if (!isGameRunning || !isDrawing) return;
     const pos = getMouseWorldPosition(e.clientX, e.clientY);
     
-    // Only add point if it's far enough from the last one to prevent jitter
     if (drawingPathPoints.length > 0) {
         const lastPoint = drawingPathPoints[drawingPathPoints.length - 1];
-        if (pos.distanceTo(lastPoint) > 0.5) {
+        if (pos.distanceTo(lastPoint) > 1.0) { // Increased threshold for smoother drawing
             drawingPathPoints.push(pos);
             updatePathVisuals();
         }
@@ -398,22 +377,22 @@ function onMouseUp() {
     isDrawing = false;
     // Transfer drawn points to the active flight path buffer
     if (drawingPathPoints.length > 1) {
-        flightPathPoints = [...drawingPathPoints];
+        flightPathPoints = drawingPathPoints.slice(1); // Start path from the first drawn point, ignoring player.position
     }
-    drawingPathPoints = []; // Clear drawing buffer
-    updatePathVisuals(); // Hides line
+    drawingPathPoints = []; 
+    updatePathVisuals(); 
 }
 
+// Mobile Touch handlers
 function onTouchStart(e) {
     // FIX: Check if the user touched a button. 
-    // If yes, return immediately so the button click happens normally.
     if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
         return; 
     }
-
     if(e.touches.length > 0) {
-        onMouseDown(e.touches[0]);
-        e.preventDefault(); // Only prevent scrolling if we are NOT touching a button
+        // Use the first touch point
+        onMouseDown(e.touches[0]); 
+        e.preventDefault(); 
     }
 }
 function onTouchMove(e) {
@@ -427,10 +406,12 @@ function onTouchMove(e) {
 // ==================== GAME LOOP & LOGIC ====================
 function animate() {
     requestAnimationFrame(animate);
-    if (!isGameRunning) return;
+    if (!isGameRunning) {
+        renderer.render(scene, camera);
+        return;
+    }
 
     const time = clock.getElapsedTime();
-    const delta = clock.getDelta();
 
     updatePlayerMovement();
     updateTrails();
@@ -443,48 +424,38 @@ function animate() {
 }
 
 function updatePlayerMovement() {
-    // Engine idle animation
-    player.position.y = Math.sin(clock.elapsedTime * 2) * 0.2;
+    player.position.y = Math.sin(clock.elapsedTime * 2) * 0.2; // Keep the plane slightly moving up/down
 
-    // Follow drawn path
     if (flightPathPoints.length > 0) {
         const target = flightPathPoints[0];
         const step = CONFIG.playerSpeed;
         
-        // Move towards target
         const currentPos = player.position.clone();
-        // Ignore Y difference for movement calculation to keep plane levelish
-        const targetFlat = target.clone(); targetFlat.y = currentPos.y; 
-        const dir = targetFlat.clone().sub(currentPos).normalize();
+        const dir = target.clone().sub(currentPos).normalize();
         
-        const dist = currentPos.distanceTo(targetFlat);
+        const dist = currentPos.distanceTo(target);
 
         if (dist < step) {
-             // Reached point, snap to it and remove from list
-             player.position.x = target.x;
-             player.position.z = target.z;
+             player.position.copy(target); // Snap to point
              flightPathPoints.shift();
         } else {
-            // Move along vector
             player.position.add(dir.multiplyScalar(step));
             
-            // Bank/Rotate towards direction with smoothing
-            const lookTarget = player.position.clone().add(dir);
+            // Rotation based on movement direction
+            const lookTarget = player.position.clone().add(dir.clone().multiplyScalar(5));
             const dummy = new THREE.Object3D();
             dummy.position.copy(player.position);
             dummy.lookAt(lookTarget);
-            // Smooth rotation blend
             player.quaternion.slerp(dummy.quaternion, 0.15);
 
-            // Add banking (roll) based on turn sharpness
+            // Banking (roll)
             const bankAmount = -dir.x * 0.5;
             player.rotation.z = THREE.MathUtils.lerp(player.rotation.z, bankAmount, 0.1);
         }
         
-        // Add trail segment
         if(frameCount % 3 === 0) createTrailSegment(player.position, player.rotation);
     } else {
-         // Level out when not moving along path
+         // Level out when stationary
          player.rotation.z = THREE.MathUtils.lerp(player.rotation.z, 0, 0.1);
          player.rotation.x = THREE.MathUtils.lerp(player.rotation.x, 0, 0.1);
     }
@@ -505,8 +476,8 @@ function createTrailSegment(pos, rot) {
     const seg = new THREE.Mesh(geo, mat);
     seg.position.copy(pos);
     seg.rotation.copy(rot);
-    seg.rotation.x = Math.PI/2; // Lie flat
-    seg.position.y -= 0.2; // Slightly below ship
+    seg.rotation.x = Math.PI/2; // Orient to lie flat
+    seg.position.z += 0.5; // Offset slightly behind ship
     
     scene.add(seg);
     playerTrail.push({mesh: seg, life: 1.0});
@@ -518,7 +489,7 @@ function updateTrails() {
         let seg = playerTrail[i];
         seg.life -= 0.04;
         seg.mesh.material.opacity = seg.life * 0.6;
-        seg.mesh.scale.x = seg.life; // Shrink length
+        seg.mesh.scale.x = seg.life; 
         if(seg.life <= 0) {
             scene.remove(seg.mesh);
             playerTrail.splice(i, 1);
@@ -541,19 +512,15 @@ function handleAutoFire(time) {
 }
 
 function shoot() {
-    // Create glowing bullet geometry
     const bulletGeo = new THREE.CapsuleGeometry(0.15, 0.8, 4, 8);
-    // Additive blending makes it look like light
     const bulletMat = new THREE.MeshBasicMaterial({ color: CONFIG.colors.bullet, blending: THREE.AdditiveBlending });
     const bullet = new THREE.Mesh(bulletGeo, bulletMat);
 
     bullet.position.copy(player.position);
-    // Match player rotation so bullets fire forward relative to ship
     bullet.rotation.copy(player.rotation); 
-    bullet.rotateX(Math.PI / 2); // Re-orient capsule to point forward
-    bullet.position.y += 0.2; // Offset slightly
+    bullet.rotateX(Math.PI / 2); 
+    bullet.position.y += 0.2; 
 
-    // Calculate forward vector based on rotation
     const forwardDir = new THREE.Vector3(0, 0, -1).applyQuaternion(player.quaternion);
     bullet.userData.velocity = forwardDir.multiplyScalar(CONFIG.bulletSpeed);
 
@@ -565,10 +532,8 @@ function shoot() {
 function updateBullets() {
     for (let i = bullets.length - 1; i >= 0; i--) {
         const b = bullets[i];
-        // Move using pre-calculated velocity vector
         b.mesh.position.add(b.userData.velocity);
 
-        // Remove if too far or behind camera significantly
         if (b.mesh.position.z < -200 || b.mesh.position.z > 50 || Math.abs(b.mesh.position.x) > 100) {
             scene.remove(b.mesh);
             bullets.splice(i, 1);
@@ -581,7 +546,6 @@ function updateEnemies(time) {
     if (time > nextSpawnTime) {
         spawnEnemy();
         nextSpawnTime = time + currentSpawnRate / 1000;
-        // Ramping difficulty: spawn faster over time
         if (currentSpawnRate > 400) currentSpawnRate -= 15;
     }
 
@@ -589,12 +553,10 @@ function updateEnemies(time) {
     for (let i = enemies.length - 1; i >= 0; i--) {
         const e = enemies[i];
         e.mesh.position.z += CONFIG.enemySpeed;
-        
-        // Slight wobble curve path for enemies
         e.mesh.position.x += Math.sin(time * 2 + e.offset) * 0.1;
 
         // Player Collision
-        if (e.mesh.position.distanceTo(player.position) < 2.5) {
+        if (e.mesh.position.distanceTo(player.position) < 3.0) {
             createExplosion(player.position, CONFIG.colors.playerEngine, 20);
             playerHealth -= 25;
             updateUI();
@@ -607,7 +569,6 @@ function updateEnemies(time) {
         // Bullet Collision
         for (let j = bullets.length - 1; j >= 0; j--) {
             const b = bullets[j];
-            // Simple distance check for collision
             if (b.mesh.position.distanceTo(e.mesh.position) < 3.0) {
                 createExplosion(e.mesh.position, CONFIG.colors.enemyEngine, 15);
                 scene.remove(b.mesh);
@@ -629,26 +590,22 @@ function updateEnemies(time) {
 }
 
 function spawnEnemy() {
-    // Reuse player ship generation but with enemy colors and rotated
     const enemy = createSciFiShip(CONFIG.colors.enemyBody, CONFIG.colors.enemyEngine);
-    // Spawn wider and further back
     enemy.position.set((Math.random()-0.5)*120, 0, -200);
-    enemy.rotation.y = Math.PI; // Face player
-    enemy.scale.setScalar(1.2); // Slightly bigger
-    enemy.offset = Math.random() * 100; // For movement variation
+    enemy.rotation.y = Math.PI; 
+    enemy.scale.setScalar(1.2); 
+    enemy.offset = Math.random() * 100; 
     scene.add(enemy);
     enemies.push({ mesh: enemy, offset: enemy.offset });
 }
 
 function createExplosion(pos, color, count) {
     for (let i = 0; i < count; i++) {
-        // Use tetrahedrons for sharper sci-fi debris
         const part = new THREE.Mesh(
             new THREE.TetrahedronGeometry(Math.random()*0.5 + 0.2),
             new THREE.MeshBasicMaterial({ color: color, blending: THREE.AdditiveBlending, transparent:true })
         );
         part.position.copy(pos);
-        // Random outward velocity
         const vel = new THREE.Vector3(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5).normalize().multiplyScalar(Math.random()*1.5);
         scene.add(part);
         particles.push({ mesh: part, velocity: vel, life: 1.0, rotSpeed: (Math.random()-0.5)*0.5 });
@@ -682,4 +639,3 @@ init();
 </script>
 </body>
 </html>
-
