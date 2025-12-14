@@ -17,8 +17,6 @@
             display: flex; flex-direction: column; justify-content: space-between; padding: 20px; box-sizing: border-box; }
         .hud-text { color: white; text-shadow: 2px 2px 0 #000; font-size: 24px; font-weight: bold; }
         #score-display { position: absolute; top: 20px; left: 20px; }
-        #loading-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            color: white; font-size: 30px; font-weight: bold; text-shadow: 2px 2px 4px black; display: none; z-index: 20; }
         #health-bar-container { position: absolute; top: 20px; right: 20px;
             width: 200px; height: 20px; background: rgba(0,0,0,0.5);
             border: 2px solid white; border-radius: 10px; overflow: hidden; }
@@ -47,7 +45,6 @@
 <body>
 
 <div id="game-container"></div>
-<div id="loading-text">Loading Assets...</div>
 
 <div id="ui-layer">
     <div id="score-display" class="hud-text">SCORE: 0</div>
@@ -66,12 +63,11 @@
     <button id="restart-btn">Retry Mission</button>
 </div>
 
-<!-- USE MODULE VERSION OF THREE.JS & GLTFLOADER -->
 <script type="module">
 
 // ==================== IMPORTS ====================
+// Only importing Three.js core, no loaders needed
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js";
-import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/loaders/GLTFLoader.js";
 
 // ==================== CONFIG ====================
 const CONFIG = {
@@ -101,8 +97,6 @@ let isGameRunning = false;
 let lastTime = 0;
 let spawnTimer = 0;
 
-let loadedModel = null;
-
 // Mouse
 const mouse = { x: 0, y: 0 };
 const targetPosition = { x: 0, y: 0 };
@@ -114,7 +108,6 @@ const healthFillEl = document.getElementById('health-fill');
 const startScreen = document.getElementById('start-screen');
 const gameOverScreen = document.getElementById('game-over-screen');
 const finalScoreEl = document.getElementById('final-score');
-const loadingText = document.getElementById('loading-text');
 
 // ==================== INIT ====================
 function init() {
@@ -147,33 +140,11 @@ function init() {
     document.getElementById('start-btn').onclick = startGame;
     document.getElementById('restart-btn').onclick = startGame;
 
-    loadModelAndStart();
-}
-
-function loadModelAndStart() {
-    loadingText.style.display = 'block';
-
-    const loader = new GLTFLoader();
-
-    loader.load(
-        './airplane.glb',   // ✔ your file in same folder
-        gltf => {
-            console.log("GLB loaded successfully");
-            loadedModel = gltf.scene;
-            initGame();
-        },
-        undefined,
-        err => {
-            console.error("GLB failed, using fallback plane", err);
-            loadedModel = null;
-            initGame();
-        }
-    );
+    // Directly initialize game without loading assets
+    initGame();
 }
 
 function initGame() {
-    loadingText.style.display = 'none';
-
     player = createAirplane(CONFIG.colors.player);
     scene.add(player);
 
@@ -247,54 +218,46 @@ function createCloud() {
     scene.add(cloud);
 }
 
-// ==================== PLAYER / ENEMY MODELS ====================
+// ==================== PROCEDURAL MODEL GENERATION ====================
 function createAirplane(colorHex) {
-
-    // --- If GLB is loaded, use it ---
-    if (loadedModel) {
-        const plane = loadedModel.clone();
-        plane.scale.setScalar(CONFIG.modelScale);
-        plane.rotation.y = Math.PI;
-
-        plane.traverse(child => {
-            if (child.isMesh) {
-                child.material = child.material.clone();
-                child.material.color.setHex(colorHex);
-            }
-        });
-
-        return plane;
-    }
-
-    // --- fallback procedural plane ---
+    // This is the Three.js primitives model (No GLB required)
     const g = new THREE.Group();
 
-    const bodyMat = new THREE.MeshPhongMaterial({ color: colorHex });
+    const bodyMat = new THREE.MeshPhongMaterial({ color: colorHex, flatShading: true });
+    const darkMat = new THREE.MeshPhongMaterial({ color: 0x333333, flatShading: true });
     const propMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
 
-    const fus = new THREE.Mesh(new THREE.ConeGeometry(0.8,4,8).rotateX(Math.PI/2), bodyMat);
+    // Fuselage
+    const fus = new THREE.Mesh(new THREE.ConeGeometry(0.8, 4, 8), bodyMat);
+    fus.rotation.x = Math.PI / 2;
     fus.castShadow = true;
     g.add(fus);
 
-    const cockpit = new THREE.Mesh(new THREE.BoxGeometry(0.6,0.5,1.5), new THREE.MeshPhongMaterial({ color:0x333333 }));
-    cockpit.position.set(0,0.4,0.2);
+    // Cockpit
+    const cockpit = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.5, 1.2), darkMat);
+    cockpit.position.set(0, 0.5, 0.5);
     g.add(cockpit);
 
-    const wings = new THREE.Mesh(new THREE.BoxGeometry(6,0.2,1.2), bodyMat);
-    wings.position.set(0,0,0.2);
+    // Wings
+    const wings = new THREE.Mesh(new THREE.BoxGeometry(6, 0.1, 1.2), bodyMat);
+    wings.position.set(0, 0, 0.5);
+    wings.castShadow = true;
     g.add(wings);
 
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(2,0.2,0.8), bodyMat);
-    tail.position.set(0,0,1.8);
-    g.add(tail);
+    // Tail Horizontal
+    const tailH = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.1, 0.8), bodyMat);
+    tailH.position.set(0, 0, 1.7);
+    g.add(tailH);
 
-    const vt = new THREE.Mesh(new THREE.BoxGeometry(0.2,1,0.8), bodyMat);
-    vt.position.set(0,0.4,1.8);
-    g.add(vt);
+    // Tail Vertical
+    const tailV = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.2, 0.8), bodyMat);
+    tailV.position.set(0, 0.6, 1.7);
+    g.add(tailV);
 
-    const prop = new THREE.Mesh(new THREE.BoxGeometry(2.2,0.2,0.1), propMat);
-    prop.position.set(0,0,-2.1);
-    prop.userData.isPropeller = true;
+    // Propeller
+    const prop = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.2, 0.1), propMat);
+    prop.position.set(0, 0, -2.1);
+    prop.userData.isPropeller = true; // Tag for animation
     g.add(prop);
 
     return g;
@@ -307,11 +270,18 @@ function animate(time) {
     const delta = time - lastTime;
     lastTime = time;
 
-    if (player && !loadedModel) {
+    // Animate Propeller (Works for Player and Enemies)
+    if (player) {
         player.children.forEach(ch => {
             if (ch.userData.isPropeller) ch.rotation.z += 0.4;
         });
     }
+
+    enemies.forEach(e => {
+        e.mesh.children.forEach(ch => {
+            if (ch.userData.isPropeller) ch.rotation.z += 0.4;
+        });
+    });
 
     if (!isGameRunning) return;
 
@@ -322,6 +292,7 @@ function animate(time) {
     player.position.x += (targetPosition.x - player.position.x) * 0.1;
     player.position.y += (targetPosition.y - player.position.y) * 0.1;
 
+    // Bank angle (roll) based on horizontal movement
     player.rotation.z = -(targetPosition.x - player.position.x) * 0.05;
     player.rotation.x = (targetPosition.y - player.position.y) * 0.05;
 
@@ -347,6 +318,7 @@ function animate(time) {
         const e = enemies[i];
         e.mesh.position.z += CONFIG.enemySpeed;
 
+        // Player Collision
         const dist = e.mesh.position.distanceTo(player.position);
         if (dist < 2.0) {
             createExplosion(player.position, 0xffaa00);
@@ -360,6 +332,7 @@ function animate(time) {
             continue;
         }
 
+        // Bullet Collision
         for (let j = bullets.length - 1; j >= 0; j--) {
             const b = bullets[j];
             if (b.mesh.position.distanceTo(e.mesh.position) < 2.5) {
@@ -381,14 +354,13 @@ function animate(time) {
 
 function spawnEnemy() {
     const enemy = createAirplane(CONFIG.colors.enemy);
-
     enemy.position.set((Math.random()-0.5)*40, (Math.random()-0.5)*20, -100);
-
-    if (!loadedModel) enemy.rotation.y = Math.PI;
-
-    enemy.offset = Math.random() * 100;
+    
+    // Rotate enemy to face player
+    enemy.rotation.y = Math.PI; 
+    
     scene.add(enemy);
-    enemies.push({ mesh: enemy, offset: enemy.offset });
+    enemies.push({ mesh: enemy });
 }
 
 function shoot() {
