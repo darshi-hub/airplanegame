@@ -410,13 +410,27 @@ function onMouseUp() {
     updatePathVisuals(); 
 }
 
+// Mobile Touch handlers - SIMPLIFIED TO FIX BUTTON ISSUES
 function onTouchStart(e) {
-    if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
-    if(e.touches.length > 0) {
+    // Check if the target is a button, if so, let the dedicated button listeners handle it.
+    if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+        return; // Allow the button's own event listeners (like the dedicated startBtn touchstart) to fire
+    }
+    
+    // Only proceed to handle drawing if the game is running and it's not a button
+    if(isGameRunning && e.touches.length > 0) {
+        // Use the first touch point
         onMouseDown(e.touches[0]);
         e.preventDefault(); 
     }
 }
+function onTouchMove(e) {
+    if(e.touches.length > 0 && isGameRunning) {
+        onMouseMove(e.touches[0]);
+        e.preventDefault();
+    }
+}
+
 function onTouchMove(e) {
     if(e.touches.length > 0) {
         onMouseMove(e.touches[0]);
@@ -659,3 +673,4 @@ init();
 </script>
 </body>
 </html>
+
