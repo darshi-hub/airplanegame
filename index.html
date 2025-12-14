@@ -162,6 +162,14 @@ function init() {
     initPathVisualization();
 
     // Event Listeners
+    // Add this inside the init() function, near the other button listeners
+    const startBtn = document.getElementById('start-btn');
+    const restartBtn = document.getElementById('restart-btn');
+
+    // Listen for touchstart specifically on buttons to trigger immediately
+    startBtn.addEventListener('touchstart', (e) => { e.stopPropagation(); startGame(); }, {passive: false});
+    restartBtn.addEventListener('touchstart', (e) => { e.stopPropagation(); startGame(); }, {passive: false});
+
     window.addEventListener('resize', onWindowResize);
     // New Drawing Controls
     document.addEventListener('mousedown', onMouseDown);
@@ -396,11 +404,16 @@ function onMouseUp() {
     updatePathVisuals(); // Hides line
 }
 
-// Mobile Touch handlers
 function onTouchStart(e) {
+    // FIX: Check if the user touched a button. 
+    // If yes, return immediately so the button click happens normally.
+    if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+        return; 
+    }
+
     if(e.touches.length > 0) {
         onMouseDown(e.touches[0]);
-        e.preventDefault(); // Prevent scrolling
+        e.preventDefault(); // Only prevent scrolling if we are NOT touching a button
     }
 }
 function onTouchMove(e) {
@@ -669,3 +682,4 @@ init();
 </script>
 </body>
 </html>
+
